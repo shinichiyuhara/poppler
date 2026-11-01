@@ -32,6 +32,8 @@
 // Copyright (C) 2025 Hagen Möbius <hagen.moebius@googlemail.com>
 // Copyright (C) 2026 Aditya Tiwari <suntiwari3495@gmail.com>
 // Copyright (C) 2026 Diego Costa R. <diegocostar@gmail.com>
+// Copyright (C) 2026 Shinichi Yuhara
+// Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -657,6 +659,7 @@ public:
     // If true, will combine characters when a base and combining
     // character are drawn on eachother.
     void setMergeCombining(bool merge);
+    void setStreamOrder(bool order) { streamOrder = order; }
 
     void setInlineLinkURIs(bool inlineLinkURIsA);
 
@@ -673,6 +676,7 @@ private:
     static void adjustRotation(TextLine *line, int start, int end, double *xMin, double *xMax, double *yMin, double *yMax);
 
     bool rawOrder; // keep text in content stream order
+    bool streamOrder = false; // coalesce, then emit in content stream order
     bool discardDiag; // discard diagonal text
     bool inlineLinkURIs = false;
     bool mergeCombining; // merge when combining and base characters
@@ -861,6 +865,8 @@ public:
     // If true, will combine characters when a base and combining
     // character are drawn on eachother.
     void setMergeCombining(bool merge);
+    // Coalesce as usual, then emit in content stream order (Zeteion patch).
+    void setStreamOrder(bool order);
 
     // Build a flat word list, in content stream order (if
     // this->rawOrder is true), physical layout order (if

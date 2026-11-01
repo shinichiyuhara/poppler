@@ -38,6 +38,8 @@
 // Copyright (C) 2026 Ojas Maheshwari <workonlyojas@gmail.com>
 // Copyright (C) 2026 Aditya Tiwari <suntiwari3495@gmail.com>
 // Copyright (C) 2026 Diego Costa R. <diegocostar@gmail.com>
+// Copyright (C) 2026 Shinichi Yuhara
+// Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -92,6 +94,7 @@ static bool useCropBox = false;
 static double colspacing = TextOutputDev::minColSpacing1_default;
 static double fixedPitch = 0;
 static bool rawOrder = false;
+static bool streamOrder = false;
 static bool discardDiag = false;
 static bool htmlMeta = false;
 static char textEncName[128] = "";
@@ -117,6 +120,7 @@ static const ArgDesc argDesc[] = { { .arg = "-f", .kind = argInt, .val = &firstP
                                    { .arg = "-layout", .kind = argFlag, .val = &physLayout, .size = 0, .usage = "maintain original physical layout" },
                                    { .arg = "-fixed", .kind = argFP, .val = &fixedPitch, .size = 0, .usage = "assume fixed-pitch (or tabular) text" },
                                    { .arg = "-raw", .kind = argFlag, .val = &rawOrder, .size = 0, .usage = "keep strings in content stream order" },
+                                   { .arg = "-streamorder", .kind = argFlag, .val = &streamOrder, .size = 0, .usage = "assemble words as the default mode does, but output them in content stream order" },
                                    { .arg = "-remove-hyphens", .kind = argString, .val = hyphenModeStr, .size = sizeof(hyphenModeStr), .usage = "end-of-line hyphen handling: none, soft, or all (default: all)" },
                                    { .arg = "-nodiag", .kind = argFlag, .val = &discardDiag, .size = 0, .usage = "discard diagonal text" },
                                    { .arg = "-htmlmeta", .kind = argFlag, .val = &htmlMeta, .size = 0, .usage = "generate a simple HTML file, including the meta information" },
@@ -369,6 +373,7 @@ int main(int argc, char *argv[])
     // write text file
     if (htmlMeta && bbox) { // htmlMeta && is superfluous but makes gcc happier
         TextOutputDev textOut(nullptr, physLayout, fixedPitch, rawOrder, htmlMeta, discardDiag);
+        textOut.setStreamOrder(streamOrder);
 
         if (textOut.isOk()) {
             textOut.setTextEOL(textEOL);
@@ -390,6 +395,7 @@ int main(int argc, char *argv[])
 
         if (tsvMode) {
             TextOutputDev textOut(nullptr, physLayout, fixedPitch, rawOrder, htmlMeta, discardDiag);
+            textOut.setStreamOrder(streamOrder);
             textOut.setEndOfLineHyphenMode(hyphenMode);
             if (!textFileName->compare("-")) {
                 f = stdout;
@@ -405,6 +411,7 @@ int main(int argc, char *argv[])
             }
         } else {
             TextOutputDev textOut(textFileName->c_str(), physLayout, fixedPitch, rawOrder, htmlMeta, discardDiag);
+            textOut.setStreamOrder(streamOrder);
             if (textOut.isOk()) {
                 textOut.setTextEOL(textEOL);
                 textOut.setMinColSpacing1(colspacing);
