@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "このリポジトリは取り込みではなく fork である。",
+    "規約: ~/Developer/Claude/Conventions/vendored-source-conventions.jp.md §6.2.4。auto_merge は Conventions/tools/fork-sync.py が読む。"
+  ],
+  "vendored": [],
+  "forks": [
+    {
+      "name": "poppler",
+      "upstream": "gitlab.freedesktop.org/poppler/poppler",
+      "upstream_ref": "upstream/master",
+      "merge_base": "2703be11769c1f86f4d0dc3b276ec94bba5ac6d3",
+      "branched_at": "poppler-26.10.0",
+      "license": "GPL-2.0-only OR GPL-3.0-only",
+      "doc": "VENDORED.md",
+      "why": "pdftotext の既定は座標で並べ直すので縦書きと段組で語句が切れ、-raw は字間に空白が入る。語の組み立てを保ったまま描画順で出す -streamorder を足した。",
+      "released_as": "poppler-X.Y.Z-sy.N",
+      "release_tags": "^poppler-\\d+\\.\\d+\\.\\d+$",
+      "auto_merge": {
+        "branch": "streamorder",
+        "fork_tag": "{tag}-sy.1",
+        "build": ["fork/build-pdftotext.sh", "{worktree}", "{build}"],
+        "verify": ["fork/sync-verify.sh", "{build}/utils/pdftotext", "{build}"],
+        "changelog": "CHANGELOG-streamorder.md"
+      },
+      "consumers": [
+        {
+          "app": "Zeteion",
+          "repo": "~/Developer/Claude/Zeteion",
+          "pin": "scripts/build-pdftotext-stream.sh の FORK_TAG と FORK_COMMIT",
+          "pin_file": "scripts/build-pdftotext-stream.sh"
+        }
+      ],
+      "review": {
+        "last_checked": "2026-11-01",
+        "checked_through": "2703be11769c1f86f4d0dc3b276ec94bba5ac6d3",
+        "verdict": "adopted",
+        "note": "Poppler 26.10.0 に -streamorder を載せた時点。これより後の上流は未読。"
+      }
+    }
+  ]
+}
