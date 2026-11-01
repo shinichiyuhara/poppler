@@ -19,9 +19,18 @@
       "auto_merge": {
         "branch": "streamorder",
         "fork_tag": "{tag}-sy.1",
-        "build": ["fork/build-pdftotext.sh", "{worktree}", "{build}"],
-        "verify": ["fork/sync-verify.sh", "{build}/utils/pdftotext", "{build}"],
-        "changelog": "CHANGELOG-streamorder.md"
+        "build": [
+          "fork/build-pdftotext.sh",
+          "{worktree}",
+          "{build}"
+        ],
+        "verify": [
+          "fork/sync-verify.sh",
+          "{build}/utils/pdftotext",
+          "{build}"
+        ],
+        "changelog": "CHANGELOG-streamorder.md",
+        "defer_if_running": "fts reextract-japanese"
       },
       "consumers": [
         {
