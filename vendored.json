@@ -4,6 +4,16 @@
     "規約: ~/Developer/Claude/Conventions/vendored-source-conventions.jp.md §6.2.4。auto_merge は Conventions/tools/fork-sync.py が読む。"
   ],
   "vendored": [],
+  "not_built": [
+    {
+      "path": "test/",
+      "reason": "上流の fuzz と試験のための台本（test/ossfuzz/prepare_build.sh が glib・nss などを取る）。fork/build-pdftotext.sh はビルドしない。"
+    },
+    {
+      "path": "do-the-gnupg-2.4-dance.sh",
+      "reason": "上流の開発者が GPG の試験環境を作る台本。こちらでは使わない（ENABLE_GPGME=OFF）。"
+    }
+  ],
   "forks": [
     {
       "name": "poppler",
