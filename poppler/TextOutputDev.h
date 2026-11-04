@@ -34,6 +34,7 @@
 // Copyright (C) 2026 Diego Costa R. <diegocostar@gmail.com>
 // Copyright (C) 2026 Shinichi Yuhara
 // Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
+// Changed 2026-11-05 by Shinichi Yuhara: TextStreamItem, TextPage::streamItems(), TextOutputDev::makeStreamItems()
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -514,6 +515,22 @@ private:
 // TextWordList
 //------------------------------------------------------------------------
 
+// One word of a page in the order of -streamorder, and what follows it (streamorder fork).
+// The words belong to the TextPage and live as long as it does.
+struct TextStreamItem
+{
+    enum class After
+    {
+        Nothing, // the next word goes on directly (CJK, a vertical column)
+        Space, // one space
+        LineBreak, // end of line
+        FlowBreak // end of line and of the flow: a blank line in the text output
+    };
+    const TextWord *word;
+    After after;
+    bool dropHyphen; // the last character is an end-of-line hyphen to leave out; the line joins the next
+};
+
 class POPPLER_PRIVATE_EXPORT TextWordList
 {
 public:
@@ -660,6 +677,8 @@ public:
     // character are drawn on eachother.
     void setMergeCombining(bool merge);
     void setStreamOrder(bool order) { streamOrder = order; }
+    // Words in content stream order with their separators, as -streamorder writes them.
+    std::vector<TextStreamItem> streamItems(EndOfLineHyphenMode hyphenMode) const;
 
     void setInlineLinkURIs(bool inlineLinkURIsA);
 
@@ -867,6 +886,8 @@ public:
     void setMergeCombining(bool merge);
     // Coalesce as usual, then emit in content stream order (Zeteion patch).
     void setStreamOrder(bool order);
+    // The current page's words in -streamorder order, with their separators (streamorder fork).
+    std::vector<TextStreamItem> makeStreamItems() const;
 
     // Build a flat word list, in content stream order (if
     // this->rawOrder is true), physical layout order (if

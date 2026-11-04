@@ -20,6 +20,14 @@ overlapping text comes out twice.
   on separate lines.
 - Ruby, drawn between the characters it annotates, moves to the end of its column as separate lines.
   No character is dropped.
+- Emphasis dots (bouten) and other small marks drawn between two words of a line move to just after
+  that line, so that the line is not cut in two. No character is dropped.
+- One to four Latin letters or digits set across a vertical column (tate-chu-yoko: `X1`, `24`) stay in
+  the column instead of breaking it before and after.
+- A word drawn next on the same baseline, in the same size, just after the previous one stays on its
+  line: running heads with wide tracking, a bracket in another font, a subscript.
+- With `-tsv` and `-bbox`, words come in the same order, and `-tsv` lines and blocks are the lines and
+  blank-line-separated blocks of the text output. `-bbox-layout` is not changed.
 
 Without `-streamorder`, the output is meant to be the same as upstream's.
 

@@ -40,6 +40,7 @@
 // Copyright (C) 2026 Diego Costa R. <diegocostar@gmail.com>
 // Copyright (C) 2026 Shinichi Yuhara
 // Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
+// Changed 2026-11-05 by Shinichi Yuhara: -tsv and -bbox follow -streamorder
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -79,6 +80,7 @@ static void printInfoDate(FILE *f, Dict *infoDict, const char *key, const char *
 void printDocBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 void printWordBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 void printTSVBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
+static void printTSVStream(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 
 static int firstPage = 1;
 static int lastPage = 0;
@@ -405,7 +407,11 @@ int main(int argc, char *argv[])
                     return 2;
                 }
             }
-            printTSVBBox(f, doc.get(), &textOut, firstPage, lastPage);
+            if (streamOrder) {
+                printTSVStream(f, doc.get(), &textOut, firstPage, lastPage);
+            } else {
+                printTSVBBox(f, doc.get(), &textOut, firstPage, lastPage);
+            }
             if (f != stdout) {
                 fclose(f);
             }
@@ -579,6 +585,80 @@ void printDocBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int l
         fprintf(f, "  </page>\n");
     }
     fprintf(f, "</doc>\n");
+}
+
+// streamorder fork: -tsv with -streamorder. The rows follow the -streamorder text output: a block is
+// what the text output ends with a blank line, a line what it ends with a line break, and the words
+// come in content stream order. A removed end-of-line hyphen does not join the lines here; the word
+// keeps its hyphen, so that its box and its text agree.
+static void printTSVStream(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last)
+{
+    fputs("level\tpage_num\tpar_num\tblock_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n", f);
+    for (int page = first; page <= last; ++page) {
+        const double wid = useCropBox ? doc->getPageCropWidth(page) : doc->getPageMediaWidth(page);
+        const double hgt = useCropBox ? doc->getPageCropHeight(page) : doc->getPageMediaHeight(page);
+        fprintf(f, "%d\t%d\t%d\t%d\t%d\t%d\t%f\t%f\t%f\t%f\t%d\t###PAGE###\n", 1, page, 0, 0, 0, 0, 0.0, 0.0, wid, hgt, -1);
+        doc->displayPage(textOut, page, resolution, resolution, 0, !useCropBox, useCropBox, false);
+        const std::vector<TextStreamItem> items = textOut->makeStreamItems();
+
+        const auto box = [](const std::vector<const TextStreamItem *> &ws, double *x0, double *y0, double *x1, double *y1) {
+            *x0 = *y0 = 1E+37;
+            *x1 = *y1 = -1E+37;
+            for (const TextStreamItem *it : ws) {
+                double a, b, c, d;
+                it->word->getBBox(&a, &b, &c, &d);
+                *x0 = std::min(*x0, a);
+                *y0 = std::min(*y0, b);
+                *x1 = std::max(*x1, c);
+                *y1 = std::max(*y1, d);
+            }
+        };
+        int blockNum = 0;
+        size_t i = 0;
+        while (i < items.size()) {
+            // one block: up to and including the item that ends the flow
+            size_t end = i;
+            while (end < items.size() && items[end].after != TextStreamItem::After::FlowBreak) {
+                ++end;
+            }
+            end = std::min(end + 1, items.size());
+            std::vector<const TextStreamItem *> blockWords;
+            for (size_t k = i; k < end; ++k) {
+                blockWords.push_back(&items[k]);
+            }
+            double x0, y0, x1, y1;
+            box(blockWords, &x0, &y0, &x1, &y1);
+            fprintf(f, "%d\t%d\t%d\t%d\t%d\t%d\t%f\t%f\t%f\t%f\t%d\t###FLOW###\n", 3, page, blockNum, 0, 0, 0, x0, y0, x1 - x0, y1 - y0, -1);
+            int lineNum = 0;
+            size_t j = i;
+            while (j < end) {
+                size_t lineEnd = j;
+                while (lineEnd < end && (items[lineEnd].after == TextStreamItem::After::Nothing || items[lineEnd].after == TextStreamItem::After::Space)) {
+                    ++lineEnd;
+                }
+                lineEnd = std::min(lineEnd + 1, end);
+                std::vector<const TextStreamItem *> lineWords;
+                for (size_t k = j; k < lineEnd; ++k) {
+                    lineWords.push_back(&items[k]);
+                }
+                box(lineWords, &x0, &y0, &x1, &y1);
+                fprintf(f, "%d\t%d\t%d\t%d\t%d\t%d\t%f\t%f\t%f\t%f\t%d\t###LINE###\n", 4, page, blockNum, 0, lineNum, 0, x0, y0, x1 - x0, y1 - y0, -1);
+                int wordNum = 0;
+                for (const TextStreamItem *it : lineWords) {
+                    double a, b, c, d;
+                    it->word->getBBox(&a, &b, &c, &d);
+                    std::string row;
+                    GooString::appendf(row, "{0:d}\t{1:d}\t{2:d}\t{3:d}\t{4:d}\t{5:d}\t{6:.2f}\t{7:.2f}\t{8:.2f}\t{9:.2f}\t{10:d}\t{11:s}\n", 5, page, blockNum, 0, lineNum, wordNum, a, b, c - a, d - b, 100, it->word->getText()->c_str());
+                    fputs(row.c_str(), f);
+                    ++wordNum;
+                }
+                ++lineNum;
+                j = lineEnd;
+            }
+            ++blockNum;
+            i = end;
+        }
+    }
 }
 
 void printTSVBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last)

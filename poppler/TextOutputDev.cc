@@ -52,6 +52,7 @@
 // Copyright (C) 2026 Diego Costa R. <diegocostar@gmail.com>
 // Copyright (C) 2026 Shinichi Yuhara
 // Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
+// Changed 2026-11-05 by Shinichi Yuhara: -streamorder keeps fragments, tate-chu-yoko and running heads on their lines; streamItems()
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -2390,6 +2391,12 @@ TextWordList::TextWordList(const TextPage *text, bool physLayout)
     if (text->rawOrder) {
         for (word = text->rawWords; word; word = word->next) {
             words.push_back(word);
+        }
+
+    } else if (text->streamOrder) {
+        // streamorder fork: the order of the -streamorder text output
+        for (const TextStreamItem &item : text->streamItems(EndOfLineHyphenMode::Keep)) {
+            words.push_back(const_cast<TextWord *>(item.word));
         }
 
     } else if (physLayout) {
@@ -5237,6 +5244,227 @@ static int appendInlineLinkURI(const AnnotLink *link, const UnicodeMap *uMap, Go
     return nCols;
 }
 
+// Changed 2026-11-05 by Shinichi Yuhara (streamorder fork): the word order and the separators of
+// -streamorder are computed here, so that the text output, the word list (-bbox) and -tsv agree.
+std::vector<TextStreamItem> TextPage::streamItems(EndOfLineHyphenMode hyphenMode) const
+{
+    // coalesce() has done its work -- spacing, duplicate removal, word and line assembly -- and only
+    // the order it guessed from coordinates is replaced. A vertical book or a multi-column journal
+    // draws its text in reading order; the sorter cuts it apart. Words are the unit, not lines,
+    // because coalesce() can merge two columns into one line: a run breaks wherever the next word
+    // drawn is not the next word on the line.
+    struct StreamWord
+    {
+        const TextWord *word;
+        const TextFlow *flow;
+        const TextLine *line;
+        int pos;
+        bool fragment = false; // moved after its line by the fragment pass below
+    };
+    std::vector<StreamWord> words;
+    for (const TextFlow *flow = flows; flow; flow = flow->next) {
+        for (const TextBlock *blk = flow->blocks; blk; blk = blk->next) {
+            for (const TextLine *line = blk->lines; line; line = line->next) {
+                for (const TextWord *word = line->words; word; word = word->next) {
+                    if (!word->chars.empty()) {
+                        words.push_back({ .word = word, .flow = flow, .line = line, .pos = word->chars.front().charPos });
+                    }
+                }
+            }
+        }
+    }
+    std::ranges::stable_sort(words, {}, &StreamWord::pos);
+    const auto isCJK = [](Unicode u) { return (u >= 0x3000 && u <= 0x30FF) || (u >= 0x3400 && u <= 0x9FFF) || (u >= 0xF900 && u <= 0xFAFF) || (u >= 0xFF00 && u <= 0xFFEF); };
+    const auto boxWidth = [](const TextWord *w) {
+        double x0, y0, x1, y1;
+        w->getBBox(&x0, &y0, &x1, &y1);
+        return x1 - x0;
+    };
+    // One to four Latin letters or digits set across a vertical column (tate-chu-yoko: X1, 10, 2b).
+    // They come as horizontal words no wider than the column -- "X" and a small "1" are two -- so the
+    // column test below would end the column at them and again after them. The box of a column drawn
+    // rotated can sit half a character off the glyphs, so their centres are compared loosely.
+    const auto uprightColumn = [&isCJK](const TextWord *w) { return w->getRotation() % 2 == 1 || (w->len() == 1 && isCJK(w->chars.front().text)); };
+    const auto acrossColumn = [&isCJK, &boxWidth, &uprightColumn](const TextWord *w, const TextWord *column) {
+        if (w->len() > 4 || w->getRotation() != 0 || !uprightColumn(column)) {
+            return false;
+        }
+        if (std::ranges::any_of(w->chars, [&isCJK](const auto &c) { return isCJK(c.text); })) {
+            return false;
+        }
+        return boxWidth(w) <= 1.3 * boxWidth(column);
+    };
+    // coalesce() knows only horizontal lines when a vertical page is not drawn rotated, so each
+    // character of a column arrives as a line of its own. Drawn order already has them in
+    // sequence; what is left is to not break between one and the next directly below it. A CJK
+    // character on one side keeps two stacked lines of a Latin table apart.
+    // The gap allows for characters missing from the text: these books draw 、。っー as vertical
+    // glyphs with no Unicode value, so two of them in a row leave a hole of two characters.
+    const auto continuesColumn = [&isCJK, &acrossColumn, &boxWidth](const TextWord *a, const TextWord *b) {
+        double ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
+        a->getBBox(&ax0, &ay0, &ax1, &ay1);
+        b->getBBox(&bx0, &by0, &bx1, &by1);
+        const bool aAcross = acrossColumn(a, b), bAcross = acrossColumn(b, a);
+        if (aAcross != bAcross) {
+            const double width = boxWidth(aAcross ? b : a);
+            return std::abs((ax0 + ax1) - (bx0 + bx1)) / 2 <= 0.75 * width && by1 > ay1 && by0 - ay1 < 3.5 * width;
+        }
+        const auto upright = [](const TextWord *w) { return w->len() == 1 || w->getRotation() % 2 == 1; };
+        const auto single = [&isCJK](const TextWord *w) { return w->len() == 1 && isCJK(w->chars.front().text); };
+        if (!upright(a) || !upright(b) || !(single(a) || single(b))) {
+            return false;
+        }
+        const double width = std::max(ax1 - ax0, bx1 - bx0);
+        // By the top edges, not the gap: some fonts report boxes more than twice as tall as the
+        // step between characters, so neighbours overlap.
+        return std::abs((ax0 + ax1) - (bx0 + bx1)) / 2 <= 0.25 * width && by0 > ay0 && by0 - ay1 < 3.5 * width;
+    };
+    // Ruby is drawn between the characters it annotates and would cut the column at each one. It
+    // moves to the end of its column, as lines of its own: none of it is dropped.
+    {
+        const auto singleCJK = [&isCJK](const TextWord *w) { return w->len() == 1 && isCJK(w->chars.front().text); };
+        std::vector<StreamWord> ordered, ruby;
+        ordered.reserve(words.size());
+        const TextWord *lastMain = nullptr;
+        for (const StreamWord &w : words) {
+            if (lastMain && singleCJK(lastMain) && singleCJK(w.word) && boxWidth(w.word) < 0.75 * boxWidth(lastMain)) {
+                ruby.push_back(w);
+                continue;
+            }
+            if (!ruby.empty() && (!lastMain || !continuesColumn(lastMain, w.word))) {
+                ordered.insert(ordered.end(), ruby.begin(), ruby.end());
+                ruby.clear();
+            }
+            ordered.push_back(w);
+            lastMain = w.word;
+        }
+        ordered.insert(ordered.end(), ruby.begin(), ruby.end());
+        words = std::move(ordered);
+    }
+    // Emphasis dots (bouten) and other small marks are drawn between two words of the line they sit
+    // on, and would cut that line in two: "う会社に対する / 4 4 4 4 / 権利行使の". When the next
+    // word of the line comes a little later in the stream and only such small words are drawn in
+    // between, they move to just after the line, as a line of their own. None of them is dropped.
+    {
+        constexpr size_t maxFragmentWords = 64;
+        const auto isFragment = [](const TextWord *f, const TextWord *base, const TextLine *line) {
+            if (f->fontSize >= 0.6 * base->fontSize) {
+                return false;
+            }
+            const double pad = 0.5 * base->fontSize;
+            return f->xMin < line->xMax + pad && f->xMax > line->xMin - pad && f->yMin < line->yMax + pad && f->yMax > line->yMin - pad;
+        };
+        std::vector<StreamWord> ordered, pending;
+        ordered.reserve(words.size());
+        size_t i = 0;
+        while (i < words.size()) {
+            const StreamWord &w = words[i];
+            ordered.push_back(w);
+            size_t nextIdx = i + 1;
+            const TextWord *lineNext = w.word->next;
+            if (lineNext && nextIdx < words.size() && words[nextIdx].word != lineNext) {
+                size_t j = nextIdx;
+                while (j < words.size() && j - nextIdx < maxFragmentWords && words[j].word != lineNext && isFragment(words[j].word, w.word, w.line)) {
+                    ++j;
+                }
+                if (j > nextIdx && j < words.size() && words[j].word == lineNext) {
+                    for (size_t k = nextIdx; k < j; ++k) {
+                        pending.push_back(words[k]);
+                        pending.back().fragment = true;
+                    }
+                    nextIdx = j;
+                }
+            }
+            const bool lineGoesOn = nextIdx < words.size() && words[nextIdx].word == lineNext;
+            if (!lineGoesOn && !pending.empty()) {
+                ordered.insert(ordered.end(), pending.begin(), pending.end());
+                pending.clear();
+            }
+            i = nextIdx;
+        }
+        ordered.insert(ordered.end(), pending.begin(), pending.end());
+        words = std::move(ordered);
+    }
+    // The next word drawn sits on the same baseline, in the same size, just after this one, yet
+    // coalesce() put it on another line: running heads set with wide tracking, or two heads printed
+    // over each other, come out one word per line; a bracket in another font starts a line of its
+    // own. Reading on is what the page shows. A full-width bracket's box reaches back over the
+    // previous character, hence the overlap allowed; the limit of one and a half em keeps a column
+    // gutter a break. A smaller word set close on the right, inside the height of this one, is a
+    // subscript or superscript (X1 with a small 1): it goes on without a space.
+    const auto continuesLine = [](const TextWord *a, const TextWord *b) {
+        const int rot = a->getRotation();
+        if (rot != b->getRotation() || (rot != 0 && rot != 1)) {
+            return false;
+        }
+        const double size = std::max(a->fontSize, b->fontSize);
+        const double gap = rot == 0 ? b->xMin - a->xMax : b->yMin - a->yMax;
+        if (std::abs(a->fontSize - b->fontSize) <= 0.2 * size && std::abs(a->base - b->base) <= 0.15 * size) {
+            // Japanese typesetting squeezes the space of 、。 before an opening bracket (yakumono
+            // tsume), so the bracket starts up to a full em inside the box of the previous character.
+            const auto squeezes = [](Unicode u) { return u == 0x3001 || u == 0x3002 || u == 0xFF0C || u == 0xFF0E; };
+            const auto opens = [](Unicode u) { return u == 0x300C || u == 0x300E || u == 0xFF08 || u == 0x3014 || u == 0x3010 || u == 0x3008 || u == 0x300A || u == 0x201C || u == 0x2018 || u == 0xFF3B || u == 0xFF5B; };
+            const double overlap = squeezes(a->chars.back().text) || opens(b->chars.front().text) ? 1.05 : 0.6;
+            return gap > -overlap * size && gap <= 1.5 * size;
+        }
+        if (rot == 0 && b->fontSize < a->fontSize && b->fontSize >= 0.4 * a->fontSize) {
+            const double slack = 0.3 * a->fontSize;
+            return gap > -slack && gap <= slack && b->yMin >= a->yMin - slack && b->yMax <= a->yMax + slack;
+        }
+        return false;
+    };
+    const auto lineGap = [](const TextWord *a, const TextWord *b) { return a->getRotation() == 0 ? b->xMin - a->xMax : b->yMin - a->yMax; };
+
+    std::vector<TextStreamItem> items;
+    items.reserve(words.size());
+    for (size_t i = 0; i < words.size(); ++i) {
+        const StreamWord &cur = words[i];
+        const StreamWord *next = i + 1 < words.size() ? &words[i + 1] : nullptr;
+        const int n = cur.word->len();
+        const Unicode last = cur.word->chars.back().text;
+        TextStreamItem item { .word = cur.word, .after = TextStreamItem::After::LineBreak, .dropHyphen = false };
+        if (next && next->word == cur.word->next) {
+            // Japanese has no spaces between words, yet the gap around a Latin letter or digit
+            // reads as one: 第1審 came out as "第 1 審", which no search for it can find.
+            const bool space = cur.word->spaceAfter && !isCJK(last) && !isCJK(next->word->chars.front().text);
+            item.after = space ? TextStreamItem::After::Space : TextStreamItem::After::Nothing;
+        } else if (next && !cur.fragment && !next->fragment && continuesColumn(cur.word, next->word)) {
+            item.after = TextStreamItem::After::Nothing;
+        } else if (next && !cur.fragment && !next->fragment && continuesLine(cur.word, next->word)) {
+            const bool sameSize = std::abs(cur.word->fontSize - next->word->fontSize) <= 0.2 * std::max(cur.word->fontSize, next->word->fontSize);
+            const bool space = sameSize && lineGap(cur.word, next->word) > 0.15 * cur.word->fontSize && !isCJK(last) && !isCJK(next->word->chars.front().text);
+            item.after = space ? TextStreamItem::After::Space : TextStreamItem::After::Nothing;
+            // A soft hyphen shows only where a line breaks; joined here it is not shown.
+            item.dropHyphen = hyphenMode != EndOfLineHyphenMode::Keep && last == static_cast<Unicode>(0x00AD);
+        } else {
+            if (next && hyphenMode != EndOfLineHyphenMode::Keep && n > 0 && !cur.fragment) {
+                item.dropHyphen = last == static_cast<Unicode>(0x00AD) || (hyphenMode == EndOfLineHyphenMode::RemoveAll && isHyphenChar(last));
+            }
+            // A blank line where the flow changes, as in the default mode. Fragments moved after
+            // their line do not count: the flow is that of the next word of the text.
+            const StreamWord *nextMain = next;
+            for (size_t k = i + 1; k < words.size() && words[k].fragment; ++k) {
+                nextMain = k + 1 < words.size() ? &words[k + 1] : nullptr;
+            }
+            const StreamWord *flowOf = cur.fragment ? nullptr : &cur;
+            if (cur.fragment) {
+                // the flow of the line the fragment was moved after
+                for (size_t k = i; k-- > 0;) {
+                    if (!words[k].fragment) {
+                        flowOf = &words[k];
+                        break;
+                    }
+                }
+            }
+            const bool flowEnds = !nextMain || !flowOf || nextMain->flow != flowOf->flow;
+            const bool fragmentsFollow = next && next->fragment && !cur.fragment;
+            item.after = flowEnds && !fragmentsFollow ? TextStreamItem::After::FlowBreak : TextStreamItem::After::LineBreak;
+        }
+        items.push_back(item);
+    }
+    return items;
+}
+
 void TextPage::dump(void *outputStream, TextOutputFunc outputFunc, bool physLayout, EndOfLineKind textEOL, bool pageBreaks, bool suppressLastEol, std::optional<PDFRectangle> area, EndOfLineHyphenMode hyphenMode) const
 {
     const UnicodeMap *uMap;
@@ -5419,106 +5647,32 @@ void TextPage::dump(void *outputStream, TextOutputFunc outputFunc, bool physLayo
         // columns into one line: a run breaks wherever the next word drawn is not the next word on
         // the line.
     } else if (streamOrder) {
-        struct StreamWord
-        {
-            const TextWord *word;
-            const TextFlow *flow;
-            int pos;
-        };
-        std::vector<StreamWord> words;
-        for (const TextFlow *flow = flows; flow; flow = flow->next) {
-            for (const TextBlock *blk = flow->blocks; blk; blk = blk->next) {
-                for (const TextLine *line = blk->lines; line; line = line->next) {
-                    for (const TextWord *word = line->words; word; word = word->next) {
-                        if (!word->chars.empty()) {
-                            words.push_back({ word, flow, word->chars.front().charPos });
-                        }
-                    }
-                }
-            }
-        }
-        std::ranges::stable_sort(words, {}, &StreamWord::pos);
-        const auto isCJK = [](Unicode u) { return (u >= 0x3000 && u <= 0x30FF) || (u >= 0x3400 && u <= 0x9FFF) || (u >= 0xF900 && u <= 0xFAFF) || (u >= 0xFF00 && u <= 0xFFEF); };
-        // coalesce() knows only horizontal lines when a vertical page is not drawn rotated, so each
-        // character of a column arrives as a line of its own. Drawn order already has them in
-        // sequence; what is left is to not break between one and the next directly below it. A CJK
-        // character on one side keeps two stacked lines of a Latin table apart.
-        // The gap allows for characters missing from the text: these books draw 、。っー as vertical
-        // glyphs with no Unicode value, so two of them in a row leave a hole of two characters.
-        const auto continuesColumn = [&isCJK](const TextWord *a, const TextWord *b) {
-            const auto upright = [](const TextWord *w) { return w->len() == 1 || w->getRotation() % 2 == 1; };
-            const auto single = [&isCJK](const TextWord *w) { return w->len() == 1 && isCJK(w->chars.front().text); };
-            if (!upright(a) || !upright(b) || !(single(a) || single(b))) {
-                return false;
-            }
-            double ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
-            a->getBBox(&ax0, &ay0, &ax1, &ay1);
-            b->getBBox(&bx0, &by0, &bx1, &by1);
-            const double width = std::max(ax1 - ax0, bx1 - bx0);
-            // By the top edges, not the gap: some fonts report boxes more than twice as tall as the
-            // step between characters, so neighbours overlap.
-            return std::abs((ax0 + ax1) - (bx0 + bx1)) / 2 <= 0.25 * width && by0 > ay0 && by0 - ay1 < 3.5 * width;
-        };
-        // Ruby is drawn between the characters it annotates and would cut the column at each one. It
-        // moves to the end of its column, as lines of its own: none of it is dropped.
-        {
-            const auto singleCJK = [&isCJK](const TextWord *w) { return w->len() == 1 && isCJK(w->chars.front().text); };
-            const auto boxWidth = [](const TextWord *w) {
-                double x0, y0, x1, y1;
-                w->getBBox(&x0, &y0, &x1, &y1);
-                return x1 - x0;
-            };
-            std::vector<StreamWord> ordered, ruby;
-            ordered.reserve(words.size());
-            const TextWord *lastMain = nullptr;
-            for (const StreamWord &w : words) {
-                if (lastMain && singleCJK(lastMain) && singleCJK(w.word) && boxWidth(w.word) < 0.75 * boxWidth(lastMain)) {
-                    ruby.push_back(w);
-                    continue;
-                }
-                if (!ruby.empty() && (!lastMain || !continuesColumn(lastMain, w.word))) {
-                    ordered.insert(ordered.end(), ruby.begin(), ruby.end());
-                    ruby.clear();
-                }
-                ordered.push_back(w);
-                lastMain = w.word;
-            }
-            ordered.insert(ordered.end(), ruby.begin(), ruby.end());
-            words = std::move(ordered);
-        }
         GooString s;
         std::vector<Unicode> uText;
-        for (size_t i = 0; i < words.size(); ++i) {
-            const StreamWord &cur = words[i];
-            const StreamWord *next = i + 1 < words.size() ? &words[i + 1] : nullptr;
-            const bool runContinues = next && next->word == cur.word->next;
-            const bool sameColumn = next && !runContinues && continuesColumn(cur.word, next->word);
-            uText.resize(cur.word->len());
-            std::ranges::transform(cur.word->chars, uText.begin(), [](const auto &c) { return c.text; });
-            const int n = cur.word->len();
-            bool suppressHyphen = false;
-            if (next && !runContinues && !sameColumn && hyphenMode != EndOfLineHyphenMode::Keep && n > 0) {
-                suppressHyphen = uText[n - 1] == static_cast<Unicode>(0x00AD) || (hyphenMode == EndOfLineHyphenMode::RemoveAll && isHyphenChar(uText[n - 1]));
-            }
+        for (const TextStreamItem &item : streamItems(hyphenMode)) {
+            const TextWord *word = item.word;
+            const int n = word->len();
+            uText.resize(n);
+            std::ranges::transform(word->chars, uText.begin(), [](const auto &c) { return c.text; });
             s.clear();
-            dumpFragment(uText.data(), suppressHyphen ? n - 1 : n, uMap, &s);
+            dumpFragment(uText.data(), item.dropHyphen ? n - 1 : n, uMap, &s);
             (*outputFunc)(outputStream, s.c_str(), s.size());
-            if (runContinues) {
-                // Japanese has no spaces between words, yet the gap around a Latin letter or digit
-                // reads as one: 第1審 came out as "第 1 審", which no search for it can find.
-                if (cur.word->spaceAfter && !isCJK(uText[n - 1]) && !isCJK(next->word->chars.front().text)) {
-                    (*outputFunc)(outputStream, space, spaceLen);
+            switch (item.after) {
+            case TextStreamItem::After::Nothing:
+                break;
+            case TextStreamItem::After::Space:
+                (*outputFunc)(outputStream, space, spaceLen);
+                break;
+            case TextStreamItem::After::LineBreak:
+            case TextStreamItem::After::FlowBreak:
+                // A removed end-of-line hyphen joins the two lines, as the other modes do.
+                if (!item.dropHyphen) {
+                    (*outputFunc)(outputStream, eol, eolLen);
                 }
-                continue;
-            }
-            if (sameColumn) {
-                continue;
-            }
-            if (!suppressHyphen) {
-                (*outputFunc)(outputStream, eol, eolLen);
-            }
-            if (!next || next->flow != cur.flow) {
-                (*outputFunc)(outputStream, eol, eolLen); // same rule as below: a blank line per flow
+                if (item.after == TextStreamItem::After::FlowBreak) {
+                    (*outputFunc)(outputStream, eol, eolLen); // same rule as below: a blank line per flow
+                }
+                break;
             }
         }
 
@@ -6065,6 +6219,11 @@ void TextOutputDev::setMergeCombining(bool merge)
 void TextOutputDev::setStreamOrder(bool order)
 {
     text->setStreamOrder(order);
+}
+
+std::vector<TextStreamItem> TextOutputDev::makeStreamItems() const
+{
+    return text->streamItems(hyphenMode);
 }
 
 std::unique_ptr<TextWordList> TextOutputDev::makeWordList()
