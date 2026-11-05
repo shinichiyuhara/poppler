@@ -3,7 +3,7 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
-## [Unreleased]
+## [poppler-26.10.0-sy.2] - 2026-11-05
 
 ### Changed
 
