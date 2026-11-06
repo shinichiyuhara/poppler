@@ -3,10 +3,11 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
-## [Unreleased]
+## [poppler-26.11.0-sy.1] - 2026-11-06
 
 ### Changed
 
+- Merged upstream `poppler-26.11.0`.
 - `fork/sync-verify.sh` compares the new build with this fork as it was before the upstream merge
   (built once per commit into `~/Library/Caches/fork-sync/poppler-baseline/`), not with the
   pdftotext a consumer has installed, which can lag the fork. A difference now comes from upstream only.
