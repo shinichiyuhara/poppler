@@ -65,6 +65,9 @@
 // Copyright (C) 2026 Adam Sampson <ats@offog.org>
 // Copyright (C) 2026 Stefan Brüns <stefan.bruens@rwth-aachen.de>
 // Copyright (C) 2026 Ojas Maheshwari <workonlyojas@gmail.com>
+// Copyright (C) 2026 Valentin Pohu <pohuvalentin@gmail.com>
+// Copyright (C) 2026 Fran Quinto <fran.quinto@gmail.com>
+// Copyright (C) 2026 Nicolas Höft <nicolas.hoeft@starlabs.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -96,6 +99,7 @@
 #include "Sound.h"
 #include "DateInfo.h"
 #include "Link.h"
+#include "FileSpec.h"
 #include "UTF.h"
 #include <cstring>
 #include <algorithm>
@@ -3079,17 +3083,19 @@ static std::unique_ptr<GfxFont> createAnnotDrawFont(XRef *xref, Dict *fontParent
         fontDict->add("Encoding", Object::name("WinAnsiEncoding"));
     }
 
-    Ref fontsDictObjRef;
-    Object fontsDictObj = fontParentDict->lookup("Font", &fontsDictObjRef);
+    Ref fontsDictObjRefToMarkAsModified;
+    Object fontsDictObj = fontParentDict->lookup("Font", &fontsDictObjRefToMarkAsModified);
     if (!fontsDictObj.isDict()) {
+        // We are creating a new Font dict so nothing to mark as modified
+        fontsDictObjRefToMarkAsModified = Ref::INVALID();
         fontsDictObj = Object(std::make_unique<Dict>(xref));
         fontParentDict->add("Font", fontsDictObj.copy()); // This is not a copy it's a ref
     }
 
     auto font = GfxFont::makeFont(xref, resourceName, dummyRef, *fontDict);
     fontsDictObj.dictSet(resourceName, Object(std::move(fontDict)));
-    if (fontsDictObjRef != Ref::INVALID()) {
-        xref->setModifiedObject(&fontsDictObj, fontsDictObjRef);
+    if (fontsDictObjRefToMarkAsModified != Ref::INVALID()) {
+        xref->setModifiedObject(&fontsDictObj, fontsDictObjRefToMarkAsModified);
     }
     return font;
 }
@@ -3252,15 +3258,39 @@ public:
     {
         Data(std::string t, std::string fName, double w, int cc) : text(std::move(t)), fontName(std::move(fName)), width(w), charCount(cc) { }
 
-        const std::string text;
-        const std::string fontName;
-        const double width;
-        const unsigned int charCount;
+        std::string text;
+        std::string fontName;
+        double width;
+        unsigned int charCount;
     };
 
     std::vector<Data> data;
     int consumedText;
 };
+
+#if ENABLE_HARFBUZZ
+// HorizontalTextLayouter stops at line breaks (or well, technically Annot::layoutText), so lay out each line of text
+static std::vector<HorizontalTextLayouter::Data> layoutAllLines(const std::string &text, const Form *form, const GfxFont &font)
+{
+    std::vector<HorizontalTextLayouter::Data> data;
+    const bool isUnicode = hasUnicodeByteOrderMark(text);
+    size_t i = 0;
+    while (i < text.size()) {
+        std::string lineText(text.substr(i));
+        if (!hasUnicodeByteOrderMark(lineText) && isUnicode) {
+            prependUnicodeByteOrderMark(lineText);
+        }
+        HorizontalTextLayouter textLayouter(lineText, form, font, std::nullopt, false);
+        data.insert(data.end(), textLayouter.data.begin(), textLayouter.data.end());
+        if (i == 0) {
+            i += textLayouter.consumedText;
+        } else {
+            i += textLayouter.consumedText - (isUnicode ? 2 : 0);
+        }
+    }
+    return data;
+}
+#endif
 
 Dict *getFontDictFromResourcesDict(const Object &resources, XRef *xref, bool transparency)
 {
@@ -3315,10 +3345,9 @@ AnnotFreeText::SubsetFontsResult AnnotFreeText::subsetFonts(const FontSubsetter 
 
     GetPrimaryFontResult primaryFontResult = getPrimaryFont(appearanceString, doc);
     Form *form = doc->getCatalog()->getForm();
-    HorizontalTextLayouter textLayouter(contents.toStr(), form, *primaryFontResult.font, std::nullopt, false);
     FontSubsetter::FontStringMap fontStringMap;
 
-    for (const auto &d : textLayouter.data) {
+    for (const auto &d : layoutAllLines(contents.toStr(), form, *primaryFontResult.font)) {
         const std::string &text = d.text;
 
         std::shared_ptr<const GfxFont> font = nullptr;
@@ -3409,11 +3438,11 @@ double Annot::calculateFontSize(const Form *form, const GfxFont &font, const std
         double y = hMax - 3;
         size_t i = 0;
         while (i < text.size()) {
-            GooString lineText(text.substr(i));
-            if (!hasUnicodeByteOrderMark(lineText.toStr()) && isUnicode) {
-                prependUnicodeByteOrderMark(lineText.toNonConstStr());
+            std::string lineText(text.substr(i));
+            if (!hasUnicodeByteOrderMark(lineText) && isUnicode) {
+                prependUnicodeByteOrderMark(lineText);
             }
-            const HorizontalTextLayouter textLayouter(lineText.toStr(), form, font, availableWidthInFontSize, forceZapfDingbats);
+            const HorizontalTextLayouter textLayouter(lineText, form, font, availableWidthInFontSize, forceZapfDingbats);
             y -= fontSize;
             if (i == 0) {
                 i += textLayouter.consumedText;
@@ -4799,7 +4828,7 @@ bool AnnotAppearanceBuilder::drawText(const std::string &inputText, const Form *
         appearBuf.append("/Tx BMC\n");
     }
     appearBuf.append("q\n");
-    auto calculateDxDy = [this, appearCharacs, &rect]() -> std::tuple<double, double> {
+    auto calculateDxDy = [this, appearCharacs, &rect] -> std::tuple<double, double> {
         const int rot = appearCharacs ? appearCharacs->getRotation() : 0;
         switch (rot) {
         case 90:
@@ -4808,7 +4837,7 @@ bool AnnotAppearanceBuilder::drawText(const std::string &inputText, const Form *
 
         case 180:
             GooString::appendf(appearBuf, "-1 0 0 -1 {0:.2f} {1:.2f} cm\n", rect.x2 - rect.x1, rect.y2 - rect.y1);
-            return { rect.x2 - rect.y2, rect.y2 - rect.y1 };
+            return { rect.x2 - rect.x1, rect.y2 - rect.y1 };
 
         case 270:
             GooString::appendf(appearBuf, "0 -1 1 0 0 {0:.2f} cm\n", rect.y2 - rect.y1);
@@ -5340,7 +5369,7 @@ bool AnnotAppearanceBuilder::drawFormFieldButton(const FormFieldButton &field, c
         }
         break;
     case formButtonCheck:
-        if (appearState && appearState->compare("Off") != 0) {
+        if (appearState && appearState != "Off") {
             if (!caption) {
                 std::string checkMark("3");
                 return drawText(checkMark, form, da, resources, border, appearCharacs, rect, VariableTextQuadding::centered, xref, resourcesDict, ForceZapfDingbatsDrawTextFlag);
@@ -5567,7 +5596,7 @@ AnnotWidget::SubsetFontsResult AnnotWidget::subsetFonts(const FontSubsetter *fon
     }
 
     // TODO: Implement subsetting when appearance is null
-    if (appearance.isNull() || form->getNeedAppearances()) {
+    if (appearance.isNull() || !form || form->getNeedAppearances()) {
         return {};
     }
 
@@ -5619,12 +5648,10 @@ AnnotWidget::SubsetFontsResult AnnotWidget::subsetFonts(const FontSubsetter *fon
         return {};
     }
 
-    HorizontalTextLayouter textLayouter(content, form, *primaryFont, std::nullopt, false);
-
     FontSubsetter::FontStringMap fontStringMap;
     bool isPassword = textField->isPassword();
 
-    for (const auto &d : textLayouter.data) {
+    for (const auto &d : layoutAllLines(content, form, *primaryFont)) {
         const std::string &text = d.text;
 
         std::shared_ptr<const GfxFont> font = nullptr;
@@ -7244,13 +7271,13 @@ void AnnotFileAttachment::draw(Gfx *gfx, bool printing)
         } else {
             appearBuilder.append("1 1 1 rg\n");
         }
-        if (!iconName->compare("PushPin")) {
+        if (iconName->toStr() == "PushPin") {
             appearBuilder.append(ANNOT_FILE_ATTACHMENT_AP_PUSHPIN);
-        } else if (!iconName->compare("Paperclip")) {
+        } else if (iconName->toStr() == "Paperclip") {
             appearBuilder.append(ANNOT_FILE_ATTACHMENT_AP_PAPERCLIP);
-        } else if (!iconName->compare("Graph")) {
+        } else if (iconName->toStr() == "Graph") {
             appearBuilder.append(ANNOT_FILE_ATTACHMENT_AP_GRAPH);
-        } else if (!iconName->compare("Tag")) {
+        } else if (iconName->toStr() == "Tag") {
             appearBuilder.append(ANNOT_FILE_ATTACHMENT_AP_TAG);
         }
         appearBuilder.append("Q\n");
@@ -7395,9 +7422,9 @@ void AnnotSound::draw(Gfx *gfx, bool printing)
         } else {
             appearBuilder.append("1 1 1 rg\n");
         }
-        if (!iconName->compare("Speaker")) {
+        if (iconName->toStr() == "Speaker") {
             appearBuilder.append(ANNOT_SOUND_AP_SPEAKER);
-        } else if (!iconName->compare("Mic")) {
+        } else if (iconName->toStr() == "Mic") {
             appearBuilder.append(ANNOT_SOUND_AP_MIC);
         }
         appearBuilder.append("Q\n");
@@ -7794,6 +7821,8 @@ AnnotRichMedia::Instance::Instance(Dict *dict)
     if (obj1.isDict()) {
         params = std::make_unique<AnnotRichMedia::Params>(obj1.getDict());
     }
+
+    asset = dict->lookup("Asset");
 }
 
 AnnotRichMedia::Instance::~Instance() = default;
@@ -7806,6 +7835,19 @@ AnnotRichMedia::Instance::Type AnnotRichMedia::Instance::getType() const
 const AnnotRichMedia::Params *AnnotRichMedia::Instance::getParams() const
 {
     return params.get();
+}
+
+std::unique_ptr<FileSpec> AnnotRichMedia::Instance::getEmbeddedFile() const
+{
+    if (!asset.isDict()) {
+        return nullptr;
+    }
+    auto fileSpec = std::make_unique<FileSpec>(&asset);
+    const EmbFile *embFile = fileSpec->getEmbeddedFile();
+    if (!embFile || !embFile->isOk()) {
+        return nullptr;
+    }
+    return fileSpec;
 }
 
 AnnotRichMedia::Params::Params(Dict *dict)

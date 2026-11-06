@@ -2,7 +2,7 @@
  * Copyright (C) 2005, Red Hat, Inc.
  *
  * Copyright (C) 2016 Jakub Alba <jakubalba@gmail.com>
- * Copyright (C) 2018, 2019, 2021, 2022 Marek Kasik <mkasik@redhat.com>
+ * Copyright (C) 2018, 2019, 2021, 2022, 2026 Marek Kasik <mkasik@redhat.com>
  * Copyright (C) 2019 Masamichi Hosoda <trueroad@trueroad.jp>
  * Copyright (C) 2019, 2021, 2024 Oliver Sander <oliver.sander@tu-dresden.de>
  * Copyright (C) 2020, 2022, 2025, 2026 Albert Astals Cid <aacid@kde.org>
@@ -3285,6 +3285,11 @@ static GList *get_optional_content_items_sorted(const OCGs *ocg, Layer *parent, 
             last_item->kids = get_optional_content_items_sorted(ocg, last_item, orderItem.getArray());
             last_item = nullptr;
         } else if (orderItem.isString()) {
+            if (!last_item) {
+                last_item = layer_new(nullptr);
+                items = g_list_prepend(items, last_item);
+            }
+            g_clear_pointer(&last_item->label, g_free);
             last_item->label = _poppler_goo_string_to_utf8(orderItem.getString());
         }
     }

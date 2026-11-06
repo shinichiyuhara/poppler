@@ -25,6 +25,7 @@
 // Copyright (C) 2023 Even Rouault <even.rouault@spatialys.com>
 // Copyright (C) 2023, 2024 Oliver Sander <oliver.sander@tu-dresden.de>
 // Copyright (C) 2025 Jonathan Hähne <jonathan.haehne@hotmail.com>
+// Copyright (C) 2026 Fran Quinto <fran.quinto@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -473,11 +474,13 @@ std::string TextStringToUtf8(std::string_view textStr)
         utf16[i] = 0;
         utf8 = utf16ToUtf8(utf16.data(), utf16.size());
     } else {
-        utf8.resize(len + 1);
+        char buf[8];
         for (i = 0; i < len; i++) {
-            utf8[i] = pdfDocEncoding[textStr[i] & 0xff];
+            const Unicode u = pdfDocEncoding[textStr[i] & 0xff];
+            if (u) {
+                utf8.append(buf, mapUTF8(u, buf, sizeof(buf)));
+            }
         }
-        utf8[i] = 0;
     }
     return utf8;
 }

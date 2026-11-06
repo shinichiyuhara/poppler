@@ -20,6 +20,7 @@
 // Copyright (C) 2020 Tobias Deiminger <haxtibal@posteo.de>
 // Copyright (C) 2026 Taufeeque Sifat <entity069@protonmail.com>
 // Copyright (C) 2026 Stefan Brüns <stefan.bruens@rwth-aachen.de>
+// Copyright (C) 2026 William Bader <william@newspapersystems.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -244,11 +245,11 @@ public:
     // Toggle debug mode on or off.
     void setDebugMode(bool debugModeA) { debugMode = debugModeA; }
 
-#if 1 //~tmp: turn off anti-aliasing temporarily
     void setInShading(bool sh) { inShading = sh; }
     bool getVectorAntialias() const { return vectorAntialias; }
+    // was this Splash created with vector antialiasing (which needs a buffer)?
+    bool hasAABuf() const { return aaBuf != nullptr; }
     void setVectorAntialias(bool vaa) { vectorAntialias = vaa; }
-#endif
 
     // Do shaded fills with dynamic patterns
     //

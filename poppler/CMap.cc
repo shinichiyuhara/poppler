@@ -291,7 +291,7 @@ void CMap::addCIDs(unsigned int start, unsigned int end, unsigned int nBytes, CI
 
     const unsigned int start1 = start & 0xffffff00;
     const unsigned int end1 = end & 0xffffff00;
-    for (unsigned int i = start1; i <= end1; i += 0x100) {
+    for (unsigned int i = start1; i <= end1;) {
         CMapVectorEntry *vec = vector;
         for (unsigned int j = nBytes - 1; j >= 1; --j) {
             const int byte = (i >> (8 * j)) & 0xff;
@@ -314,6 +314,11 @@ void CMap::addCIDs(unsigned int start, unsigned int end, unsigned int nBytes, CI
                 vec[byte].cid = firstCID + ((i + byte) - start);
             }
         }
+        // Avoid overflow when the final block starts at 0xffffff00.
+        if (i == end1) {
+            break;
+        }
+        i += 0x100;
     }
 }
 
@@ -338,7 +343,7 @@ void CMap::freeCMapVector(CMapVectorEntry *vec)
 
 bool CMap::match(const std::string &collectionA, const std::string &cMapNameA)
 {
-    return !collection->compare(collectionA) && !cMapName->compare(cMapNameA);
+    return collection->toStr() == collectionA && cMapName->toStr() == cMapNameA;
 }
 
 CID CMap::getCID(const char *s, int len, CharCode *c, int *nUsed)

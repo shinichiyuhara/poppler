@@ -32,6 +32,7 @@
  * Copyright (C) 2024 Pratham Gandhi <ppg.1382@gmail.com>
  * Copyright (C) 2024, 2026 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
  * Copyright (C) 2026 Aditya Tiwari <suntiwari3495@gmail.com>
+ * Copyright (C) 2026 Marek Kasik <mkasik@redhat.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -354,14 +355,16 @@ Link *PageData::convertLinkActionToLink(const ::LinkAction *a, DocumentData *par
         QVector<int> fieldIds;
         fieldIds.reserve(stdStringFields.size());
         Form *form = parentDoc->doc->getCatalog()->getForm();
-        for (const std::string &fieldStr : stdStringFields) {
-            ::FormField *field = form->findFieldByFullyQualifiedNameOrRef(fieldStr);
-            if (field && !field->getNoExport()) {
-                int numWidgets = field->getNumWidgets();
-                for (int i = 0; i < numWidgets; i++) {
-                    ::FormWidget *widget = field->getWidget(i);
-                    if (widget) {
-                        fieldIds.append(field->getWidget(i)->getID());
+        if (form) {
+            for (const std::string &fieldStr : stdStringFields) {
+                ::FormField *field = form->findFieldByFullyQualifiedNameOrRef(fieldStr);
+                if (field && !field->getNoExport()) {
+                    int numWidgets = field->getNumWidgets();
+                    for (int i = 0; i < numWidgets; i++) {
+                        ::FormWidget *widget = field->getWidget(i);
+                        if (widget) {
+                            fieldIds.append(field->getWidget(i)->getID());
+                        }
                     }
                 }
             }

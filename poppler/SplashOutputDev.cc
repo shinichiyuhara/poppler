@@ -22,7 +22,7 @@
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
 // Copyright (C) 2009-2016, 2020, 2022, 2023 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2009, 2014-2016, 2019 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2014-2016, 2019, 2026 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
 // Copyright (C) 2010 Brian Cameron <brian.cameron@oracle.com>
 // Copyright (C) 2010 Paweł Wiejacha <pawel.wiejacha@gmail.com>
@@ -1131,7 +1131,7 @@ T3FontCache::T3FontCache(const Ref *fontIDA, double m11A, double m12A, double m2
     validBBox = validBBoxA;
     // sanity check for excessively large glyphs (which most likely
     // indicate an incorrect BBox)
-    if (glyphW > INT_MAX / glyphH || glyphW <= 0 || glyphH <= 0 || glyphW * glyphH > 100000) {
+    if (glyphW <= 0 || glyphH <= 0 || glyphW > INT_MAX / glyphH || glyphW * glyphH > 100000) {
         glyphW = glyphH = 100;
         validBBox = false;
     }
@@ -1450,9 +1450,11 @@ void SplashOutputDev::updateLineDash(GfxState *state)
 
 void SplashOutputDev::updateFlatness(GfxState * /*state*/)
 {
-#if 0 // Acrobat ignores the flatness setting, and always renders curves
-      // with a fairly small flatness value
-   splash->setFlatness(state->getFlatness());
+#define USE_FLATNESS_VALUE 0
+#if USE_FLATNESS_VALUE
+    // Acrobat ignores the flatness setting, and always renders curves
+    // with a fairly small flatness value
+    splash->setFlatness(state->getFlatness());
 #endif
 }
 
@@ -1484,9 +1486,11 @@ void SplashOutputDev::updateLineWidth(GfxState *state)
 
 void SplashOutputDev::updateStrokeAdjust(GfxState * /*state*/)
 {
-#if 0 // the SA parameter supposedly defaults to false, but Acrobat
-      // apparently hardwires it to true
-  splash->setStrokeAdjust(state->getStrokeAdjust());
+#define USE_STROKE_ADJUST_VALUE 0
+#if USE_STROKE_ADJUST_VALUE
+    // the SA parameter supposedly defaults to false, but Acrobat
+    // apparently hardwires it to true
+    splash->setStrokeAdjust(state->getStrokeAdjust());
 #endif
 }
 
@@ -1685,7 +1689,7 @@ void SplashOutputDev::setOverprintMask(GfxColorSpace *colorSpace, bool overprint
             mask &= ~7;
         } else if (colorSpace->getMode() == csSeparation) {
             auto *deviceSep = static_cast<GfxSeparationColorSpace *>(colorSpace);
-            additive = deviceSep->getName()->compare("All") != 0 && mask == 0x0f && !deviceSep->isNonMarking();
+            additive = deviceSep->getName()->toStr() != "All" && mask == 0x0f && !deviceSep->isNonMarking();
         } else if (colorSpace->getMode() == csDeviceN) {
             auto *deviceNCS = static_cast<GfxDeviceNColorSpace *>(colorSpace);
             additive = mask == 0x0f && !deviceNCS->isNonMarking();
@@ -4178,7 +4182,6 @@ SplashBitmap *SplashOutputDev::takeBitmap()
     return ret;
 }
 
-#if 1 //~tmp: turn off anti-aliasing temporarily
 bool SplashOutputDev::getVectorAntialias()
 {
     return splash->getVectorAntialias();
@@ -4190,7 +4193,6 @@ void SplashOutputDev::setVectorAntialias(bool vaa)
     vectorAntialias = vaa;
     splash->setVectorAntialias(vaa);
 }
-#endif
 
 void SplashOutputDev::setFreeTypeHinting(bool enable, bool enableSlightHintingA)
 {
@@ -4276,6 +4278,10 @@ bool SplashOutputDev::tilingPatternFill(GfxState *state, Gfx *gfxA, Catalog * /*
         surface_height = static_cast<int>(ceil(fabs(ky)));
         repeatX = x1 - x0;
         repeatY = y1 - y0;
+        if (repeatX < 0 || repeatY < 0) {
+            state->setCTM(savedCTM[0], savedCTM[1], savedCTM[2], savedCTM[3], savedCTM[4], savedCTM[5]);
+            return false;
+        }
         while (static_cast<unsigned long>(repeatX) * repeatY > 0x800000L) {
             // try to avoid bogus memory allocation size
             if (repeatX > 1) {
@@ -4448,8 +4454,9 @@ bool SplashOutputDev::univariateShadedFill(GfxState *state, SplashUnivariatePatt
 {
     double xMin, yMin, xMax, yMax;
     bool vaa = getVectorAntialias();
-    // restore vector antialias because we support it here
-    setVectorAntialias(true);
+    // restore vector antialias because we support it here, if this Splash can do
+    // it; otherwise shade without antialiasing rather than fail
+    setVectorAntialias(splash->hasAABuf());
 
     bool retVal = false;
     // get the clip region bbox
@@ -4511,8 +4518,9 @@ bool SplashOutputDev::functionShadedFill(GfxState *state, GfxFunctionShading *sh
     SplashFunctionPattern pattern(colorMode, state, shading);
     double xMin, yMin, xMax, yMax;
     bool vaa = getVectorAntialias();
-    // restore vector antialias because we support it here
-    setVectorAntialias(true);
+    // restore vector antialias because we support it here, if this Splash can do
+    // it; otherwise shade without antialiasing rather than fail
+    setVectorAntialias(splash->hasAABuf());
 
     bool retVal = false;
     // get the clip region bbox

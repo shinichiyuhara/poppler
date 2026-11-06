@@ -6,10 +6,12 @@
 //
 // Copyright 2023, 2024 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
 // Copyright 2024-2026 Albert Astals Cid <aacid@kde.org>
+// Copyright 2026 John Cater <katre@henchmonkey.org>
 //
 //========================================================================
 #include "CryptoSignBackend.h"
 #include "config.h"
+#include <cstdlib>
 #if ENABLE_GPGME
 #    include "GPGMECryptoSignBackend.h"
 #endif

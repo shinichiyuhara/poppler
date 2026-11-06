@@ -28,7 +28,7 @@
 // Copyright (C) 2020, 2021 Philipp Knechtges <philipp-dev@knechtges.com>
 // Copyright (C) 2024 Athul Raj Kollareth <krathul3152@gmail.com>
 // Copyright (C) 2024 Nelson Benítez León <nbenitezl@gmail.com>
-// Copyright (C) 2025 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
+// Copyright (C) 2025, 2026 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
 // Copyright (C) 2025 Trystan Mata <trystan.mata@tytanium.xyz>
 //
 // To see a description of the changes please see the Changelog file that
@@ -1445,8 +1445,6 @@ public:
     std::shared_ptr<GfxColorTransform> getPerc() const { return XYZ2DisplayTransformPerc; }
 
 private:
-    static GfxLCMSProfilePtr XYZProfile;
-
     GfxLCMSProfilePtr displayProfile;
 
     std::shared_ptr<GfxColorTransform> XYZ2DisplayTransformRelCol;
@@ -1701,7 +1699,7 @@ public:
     void setXYZ2DisplayTransforms(std::shared_ptr<GfxXYZ2DisplayTransforms> transforms);
     std::shared_ptr<GfxColorTransform> getXYZ2DisplayTransform();
     int getCmsRenderingIntent() const;
-    static GfxLCMSProfilePtr sRGBProfile;
+    static GfxLCMSProfilePtr sRGBProfile();
 #endif
 
     void setDefaultGrayColorSpace(std::unique_ptr<GfxColorSpace> &&cs) { defaultGrayColorSpace = std::move(cs); }
