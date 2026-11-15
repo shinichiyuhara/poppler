@@ -25,11 +25,17 @@ else
     git rev-parse -q --verify HEAD^2 >/dev/null || { echo "HEAD is not a merge; set FORK_SYNC_BASELINE"; exit 1; }
     commit="$(git rev-parse HEAD^1)"
     CACHE="${FORK_SYNC_BASELINE_CACHE:-$HOME/Library/Caches/fork-sync/poppler-baseline}"
+    # Older baselines are deleted below, so the cache must be a folder of this script's own: one
+    # named poppler-baseline. A mistyped FORK_SYNC_BASELINE_CACHE (say $HOME) would otherwise lose
+    # every folder in it (security audit 2026-11-16, P4).
+    [ "$(basename "$CACHE")" = "poppler-baseline" ] || { echo "baseline cache must be a folder named poppler-baseline: $CACHE"; exit 1; }
     BASE="$CACHE/$commit/build/utils/pdftotext"
     if [ ! -x "$BASE" ]; then
         # Only this script writes under $CACHE; older baselines are rebuilt from git if needed.
+        # Only folders named by a full commit hash are removed, never anything else put there.
         mkdir -p "$CACHE"
-        find "$CACHE" -mindepth 1 -maxdepth 1 -type d ! -name "$commit" -exec rm -rf {} +
+        find "$CACHE" -mindepth 1 -maxdepth 1 -type d ! -name "$commit" -name '????????????????????????????????????????' \
+            -exec sh -c 'for d; do case "${d##*/}" in *[!0-9a-f]*) ;; *) rm -rf "$d" ;; esac; done' sh {} +
         src="$CACHE/$commit/src"
         git worktree remove --force "$src" 2>/dev/null
         git worktree prune

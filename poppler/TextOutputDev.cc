@@ -53,6 +53,7 @@
 // Copyright (C) 2026 Shinichi Yuhara
 // Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
 // Changed 2026-11-05 by Shinichi Yuhara: -streamorder keeps fragments, tate-chu-yoko and running heads on their lines; streamItems()
+// Changed 2026-11-16 by Shinichi Yuhara: streamItems() finds the flow of a run of fragments in linear time
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -5303,6 +5304,18 @@ std::vector<TextStreamItem> TextPage::streamItems(EndOfLineHyphenMode hyphenMode
     };
     const auto lineGap = [](const TextWord *a, const TextWord *b) { return a->getRotation() == 0 ? b->xMin - a->xMax : b->yMin - a->yMax; };
 
+    // For the flow test below: the first word at or after each position that is not a fragment, and
+    // the last one before it. Computed once, in one pass each way: looking them up word by word
+    // made a long run of fragments quadratic (security audit 2026-11-16, P2).
+    constexpr size_t none = static_cast<size_t>(-1);
+    std::vector<size_t> mainFrom(words.size() + 1, none), mainBefore(words.size(), none);
+    for (size_t k = words.size(); k-- > 0;) {
+        mainFrom[k] = words[k].fragment ? mainFrom[k + 1] : k;
+    }
+    for (size_t k = 1; k < words.size(); ++k) {
+        mainBefore[k] = words[k - 1].fragment ? mainBefore[k - 1] : k - 1;
+    }
+
     std::vector<TextStreamItem> items;
     items.reserve(words.size());
     for (size_t i = 0; i < words.size(); ++i) {
@@ -5330,20 +5343,11 @@ std::vector<TextStreamItem> TextPage::streamItems(EndOfLineHyphenMode hyphenMode
             }
             // A blank line where the flow changes, as in the default mode. Fragments moved after
             // their line do not count: the flow is that of the next word of the text.
-            const StreamWord *nextMain = next;
-            for (size_t k = i + 1; k < words.size() && words[k].fragment; ++k) {
-                nextMain = k + 1 < words.size() ? &words[k + 1] : nullptr;
-            }
-            const StreamWord *flowOf = cur.fragment ? nullptr : &cur;
-            if (cur.fragment) {
-                // the flow of the line the fragment was moved after
-                for (size_t k = i; k-- > 0;) {
-                    if (!words[k].fragment) {
-                        flowOf = &words[k];
-                        break;
-                    }
-                }
-            }
+            const size_t nextMainIdx = mainFrom[i + 1];
+            const StreamWord *nextMain = nextMainIdx == none ? nullptr : &words[nextMainIdx];
+            // a fragment takes the flow of the line it was moved after
+            const size_t flowIdx = cur.fragment ? mainBefore[i] : i;
+            const StreamWord *flowOf = flowIdx == none ? nullptr : &words[flowIdx];
             const bool flowEnds = !nextMain || !flowOf || nextMain->flow != flowOf->flow;
             const bool fragmentsFollow = next && next->fragment && !cur.fragment;
             item.after = flowEnds && !fragmentsFollow ? TextStreamItem::After::FlowBreak : TextStreamItem::After::LineBreak;
