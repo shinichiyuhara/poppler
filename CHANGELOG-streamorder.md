@@ -3,6 +3,32 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
+## [poppler-26.11.0-sy.3] - 2026-11-20
+
+### Security
+
+Five fixes taken from upstream `master` ahead of its next release (`git cherry-pick -x`, so each commit
+names its upstream original). pdftotext runs these paths: it evaluates a PostScript (Type 4) function
+to work out the colour of text drawn in a Separation or DeviceN colour space.
+
+- `PostScriptFunction::exec`: `sub`, `abs` and `neg` on integers no longer overflow a signed int
+  (undefined behaviour); a result out of range becomes a real number. Upstream 835bcfe34, f3d12745a,
+  f58dcd84d. The `sub` fix is adapted to this version, which declares `i1` and `i2` at the top of the
+  function.
+- `PostScriptFunction::exec`: `bitshift` by 32 or more places, either way, no longer shifts by more
+  than the width of an int (undefined behaviour); it reports an error and gives 0. A left shift is
+  done on an unsigned int. Upstream 5c95e5f71, adapted the same way.
+- `pdftotext -htmlmeta`: a document-information string that starts with a UTF-16 byte-order mark
+  and has an odd length is skipped instead of read one byte past its end. Upstream d27c83dd4.
+
+### Checked
+
+- On 30 PDFs, the output of `-streamorder` (`fork/sync-verify.sh`), `-streamorder -tsv`, the default
+  mode and `-layout` is the same as `-sy.2`.
+- A PDF whose text colour comes from a Type 4 function doing `neg`, `abs`, `sub` at the int limits
+  and `bitshift` by 40: built with `-fsanitize=undefined`, `-sy.2` reports undefined behaviour and
+  `-sy.3` does not.
+
 ## [poppler-26.11.0-sy.2] - 2026-11-16
 
 ### Security
