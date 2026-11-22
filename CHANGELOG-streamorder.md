@@ -3,6 +3,30 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
+## [poppler-26.11.0-sy.4] - 2026-11-23
+
+### Fixed
+
+- The text of a marked-content span with `/ActualText` is placed with the graphics state of the
+  span's first glyph, not the one current at its end (EMC). Producers that draw each such glyph
+  inside its own `q … cm … Q` (Core Text draws every ligature as `/Span <</ActualText (fi)>> BDC q
+  cm BT … Tj ET Q EMC`) had the `cm` and the font already undone at EMC: on a page whose text is
+  turned (a landscape page with `/Rotate 90`, as pdflscape makes it) the ligature became a word of
+  its own 1 pt wide, put where the unturned text would be, and `firm` came out as `rm` with `fi` on
+  another line; with a scaling `cm` (`10 0 0 10 cm`, seen in an InDesign book) the span's text
+  landed on a line of its own away from its neighbours. Upstream has the same fault (checked on
+  `master` 9182fd5da).
+  `ActualText` keeps a copy of the first glyph's `GfxState` (`copy(true)`, so the copy owns its
+  path) and puts the font of that state in force while it adds the span's text.
+
+### Checked
+
+- On 30 PDFs, the output of `-streamorder`, `-streamorder -tsv`, the default mode and `-layout` is
+  the same as `-sy.3`. Of PDFViewer's 9 test PDFs one differs: the `ActualText` span above, now on
+  the line of the glyphs before it.
+- Three generated pages (no rotation; `/Rotate 90` with turned text; turned text without `/Rotate`)
+  with `fi`/`fl` ligatures give the plain text in both `-streamorder` and the default mode.
+
 ## [poppler-26.11.0-sy.3] - 2026-11-20
 
 ### Security

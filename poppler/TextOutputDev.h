@@ -760,6 +760,11 @@ private:
     TextPage *text;
 
     std::optional<std::string> actualText; // replacement text for the span
+    // The graphics state at the span's first glyph [streamorder fork]. The span's text is added
+    // at its end (EMC), where a "q ... cm ... Q" inside the span has already been undone; the
+    // positions below are in the user space of the first glyph, so they are turned into device
+    // space with its state, not the one current at EMC.
+    std::unique_ptr<GfxState> actualTextState;
     double actualTextX0;
     double actualTextY0;
     double actualTextX1;

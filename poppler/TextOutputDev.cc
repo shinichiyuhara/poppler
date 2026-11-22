@@ -5761,6 +5761,8 @@ void ActualText::addChar(const GfxState *state, double x, double y, double dx, d
     if (!actualTextNBytes) {
         actualTextX0 = x;
         actualTextY0 = y;
+        // copy(true): without its own path the copy would share the original's and delete it.
+        actualTextState.reset(state->copy(true));
     }
     actualTextX1 = x + dx;
     actualTextY1 = y + dy;
@@ -5784,10 +5786,25 @@ void ActualText::end(const GfxState *state)
         // text->addChar()
         assert(actualText.has_value());
         std::vector<Unicode> uni = TextStringToUCS4(actualText.value());
-        text->addChar(state, actualTextX0, actualTextY0, actualTextX1 - actualTextX0, actualTextY1 - actualTextY0, 0, actualTextNBytes, uni.data(), uni.size());
+        // The state of the first glyph [streamorder fork]: see actualTextState in the header.
+        // Producers such as Core Text draw a ligature as "/Span <</ActualText (fi)>> BDC q cm BT
+        // ... Tj ET Q EMC"; with the state at EMC, text turned by that cm (a landscape page) was
+        // put where the unturned text would be, as a separate word.
+        // Its font too: the "Q" has also undone the span's "Tf", and with the font at EMC (none,
+        // size 0) the word's box came out 1 pt wide and was taken for a line of its own. The
+        // font of the current state is put back afterwards for the text that follows.
+        const GfxState *at = actualTextState ? actualTextState.get() : state;
+        if (at != state) {
+            text->updateFont(at);
+        }
+        text->addChar(at, actualTextX0, actualTextY0, actualTextX1 - actualTextX0, actualTextY1 - actualTextY0, 0, actualTextNBytes, uni.data(), uni.size());
+        if (at != state) {
+            text->updateFont(state);
+        }
     }
 
     actualText.reset();
+    actualTextState.reset();
     actualTextNBytes = 0;
 }
 
