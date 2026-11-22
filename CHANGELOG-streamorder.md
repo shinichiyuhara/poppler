@@ -3,6 +3,27 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
+## [poppler-26.11.0-sy.5] - 2026-11-23
+
+### Fixed
+
+- A marked-content span with `/ActualText` whose glyphs are drawn under different CTMs (each in its
+  own `q … cm … Q`) is measured in the first glyph's user space: the end of a later glyph was taken
+  in its own space and read in the first glyph's, so the span came out too short or too long. A
+  generated "fi" span with the `i` under a scaling `cm` was 1.55 pt wide and a word of its own; it
+  now joins "rm" as "firm". Under one CTM nothing changes (the conversion is skipped).
+- A span left open at the end of a page (a `BDC` with no `EMC`) is closed there and its text added
+  with its first glyph's state. It used to stay open and swallow every glyph until some later
+  `EMC`: on a generated two-page PDF the span's own text and all of page 2 were missing. Upstream
+  has the same fault.
+
+### Checked
+
+- On 38 PDFs (the 30 samples, PDFViewer's 7 test subsets and a landscape page), the output of
+  `-streamorder`, `-streamorder -tsv`, the default mode and `-layout` is the same as `-sy.4`.
+- Two generated PDFs show both faults with `-sy.4` and the fix with `-sy.5` (an open span across a
+  page break; a span whose second glyph is under a scaling `cm`).
+
 ## [poppler-26.11.0-sy.4] - 2026-11-23
 
 ### Fixed

@@ -5764,9 +5764,44 @@ void ActualText::addChar(const GfxState *state, double x, double y, double dx, d
         // copy(true): without its own path the copy would share the original's and delete it.
         actualTextState.reset(state->copy(true));
     }
-    actualTextX1 = x + dx;
-    actualTextY1 = y + dy;
+    // The end of the span in the first glyph's user space [streamorder fork]: a later glyph drawn
+    // under another CTM (each in its own "q cm ... Q") gives its end in its own space, which the
+    // first glyph's state would misplace. Taken to device space with its own CTM and back with
+    // the inverse of the first glyph's; under the same CTM this is the identity, and skipped.
+    double endX = x + dx, endY = y + dy;
+    if (actualTextState && state->getCTM() != actualTextState->getCTM()) {
+        const std::array<double, 6> &m = actualTextState->getCTM();
+        const double det = m[0] * m[3] - m[1] * m[2];
+        if (det != 0) {
+            double devX, devY;
+            state->transform(endX, endY, &devX, &devY);
+            const double tx = devX - m[4], ty = devY - m[5];
+            endX = (tx * m[3] - ty * m[2]) / det;
+            endY = (ty * m[0] - tx * m[1]) / det;
+        }
+    }
+    actualTextX1 = endX;
+    actualTextY1 = endY;
     actualTextNBytes += nBytes;
+}
+
+void ActualText::endPage()
+{
+    // A span still open when the page ends (a BDC with no EMC) [streamorder fork]: its text is
+    // added now, with its first glyph's state, and the span is closed. Otherwise the open span
+    // went on swallowing the glyphs of the following pages until some later EMC, and the text of
+    // those pages was lost (upstream has the same fault).
+    if (actualText && actualTextNBytes && actualTextState) {
+        // end() with the first glyph's state as the current one: it uses that state and its
+        // font (put in force here, since end() swaps fonts only for a state other than the
+        // current), then drops it. Nothing on this page follows, so the font is not put back.
+        const GfxState *first = actualTextState.get();
+        text->updateFont(first);
+        end(first);
+    }
+    actualText.reset();
+    actualTextState.reset();
+    actualTextNBytes = 0;
 }
 
 void ActualText::begin(const GfxState * /*state*/, const std::string &t)
@@ -5902,6 +5937,7 @@ void TextOutputDev::endPage()
             processLink(annot.get());
         }
     }
+    actualText->endPage();
     text->endPage();
     text->coalesce(physLayout, fixedPitch, doHTML, minColSpacing1);
     if (outputStream) {

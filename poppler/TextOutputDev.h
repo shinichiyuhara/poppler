@@ -755,6 +755,8 @@ public:
     void addChar(const GfxState *state, double x, double y, double dx, double dy, CharCode c, int nBytes, const Unicode *u, int uLen);
     void begin(const GfxState *state, const std::string &text);
     void end(const GfxState *state);
+    /// Close a span the page left open [streamorder fork].
+    void endPage();
 
 private:
     TextPage *text;
