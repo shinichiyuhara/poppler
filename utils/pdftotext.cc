@@ -41,6 +41,7 @@
 // Copyright (C) 2026 Shinichi Yuhara
 // Changed 2026-11-01 by Shinichi Yuhara: added -streamorder, which is not part of upstream Poppler
 // Changed 2026-11-05 by Shinichi Yuhara: -tsv and -bbox follow -streamorder
+// Changed 2026-11-24 by Shinichi Yuhara: added -streamtsv (word boxes and the separators of -streamorder in one pass)
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -81,6 +82,7 @@ void printDocBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int l
 void printWordBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 void printTSVBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 static void printTSVStream(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
+static void printStreamTSV(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last);
 
 static int firstPage = 1;
 static int lastPage = 0;
@@ -110,6 +112,7 @@ static bool printVersion = false;
 static bool printHelp = false;
 static bool printEnc = false;
 static bool tsvMode = false;
+static bool streamTSV = false;
 static char hyphenModeStr[16] = "";
 
 static const ArgDesc argDesc[] = { { .arg = "-f", .kind = argInt, .val = &firstPage, .size = 0, .usage = "first page to convert" },
@@ -127,6 +130,11 @@ static const ArgDesc argDesc[] = { { .arg = "-f", .kind = argInt, .val = &firstP
                                    { .arg = "-nodiag", .kind = argFlag, .val = &discardDiag, .size = 0, .usage = "discard diagonal text" },
                                    { .arg = "-htmlmeta", .kind = argFlag, .val = &htmlMeta, .size = 0, .usage = "generate a simple HTML file, including the meta information" },
                                    { .arg = "-tsv", .kind = argFlag, .val = &tsvMode, .size = 0, .usage = "generate a simple TSV file, including the meta information for bounding boxes" },
+                                   { .arg = "-streamtsv",
+                                     .kind = argFlag,
+                                     .val = &streamTSV,
+                                     .size = 0,
+                                     .usage = "like -streamorder -tsv, with what the -streamorder text puts after each word; only page and word rows" },
                                    { .arg = "-enc", .kind = argString, .val = textEncName, .size = sizeof(textEncName), .usage = "output text encoding name" },
                                    { .arg = "-listenc", .kind = argFlag, .val = &printEnc, .size = 0, .usage = "list available encodings" },
                                    { .arg = "-eol", .kind = argString, .val = textEOLStr, .size = sizeof(textEOLStr), .usage = "output end-of-line convention (unix, dos, or mac)" },
@@ -205,6 +213,15 @@ int main(int argc, char *argv[])
     }
     if (bbox) {
         htmlMeta = true;
+    }
+    // streamorder fork: -streamtsv is a TSV in stream order; the plain-text options do not apply.
+    if (streamTSV) {
+        if (htmlMeta || physLayout || rawOrder) {
+            error(errCommandLine, -1, "'-streamtsv' cannot be combined with -htmlmeta, -bbox, -layout or -raw");
+            return 99;
+        }
+        streamOrder = true;
+        tsvMode = true;
     }
     if (colspacing <= 0 || colspacing > 10) {
         error(errCommandLine, -1, "Bogus value provided for -colspacing");
@@ -407,7 +424,9 @@ int main(int argc, char *argv[])
                     return 2;
                 }
             }
-            if (streamOrder) {
+            if (streamTSV) {
+                printStreamTSV(f, doc.get(), &textOut, firstPage, lastPage);
+            } else if (streamOrder) {
                 printTSVStream(f, doc.get(), &textOut, firstPage, lastPage);
             } else {
                 printTSVBBox(f, doc.get(), &textOut, firstPage, lastPage);
@@ -661,6 +680,67 @@ static void printTSVStream(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int fir
             }
             ++blockNum;
             i = end;
+        }
+    }
+}
+
+// streamorder fork: -streamtsv. One pass gives what -streamorder -tsv and the -streamorder text give
+// in two: the words in content stream order with their boxes, and for each what the text output
+// writes after it. A reader had to run both and walk them together to line the words up with the
+// text (PDFViewer's PopplerStream.align); this writes the result of that walk directly.
+//
+// Rows (no block or line rows; a page row, then that page's words):
+//   level  page_num  flow  line  left  top  width  height  after  text
+// level 1 is the page (width and height as -tsv writes them, %f), level 5 a word (%.2f, as -tsv).
+// flow and line number the word's block and line as -streamorder -tsv does. after is a digit:
+//   0 nothing, 1 a space, 2 a line break, 3 a blank line (end of flow),
+//   plus 4 when the word's last character is an end-of-line hyphen the text leaves out.
+// The digit is what the text output writes: a line break after a removed hyphen is not written
+// (the lines join), so a removed hyphen goes with 0 (line) or 2 (end of flow). text is the whole
+// word, hyphen included, so that its box and its text agree.
+static void printStreamTSV(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int last)
+{
+    fputs("level\tpage_num\tflow\tline\tleft\ttop\twidth\theight\tafter\ttext\n", f);
+    std::string row;
+    for (int page = first; page <= last; ++page) {
+        const double wid = useCropBox ? doc->getPageCropWidth(page) : doc->getPageMediaWidth(page);
+        const double hgt = useCropBox ? doc->getPageCropHeight(page) : doc->getPageMediaHeight(page);
+        fprintf(f, "%d\t%d\t%d\t%d\t%f\t%f\t%f\t%f\t%d\t###PAGE###\n", 1, page, 0, 0, 0.0, 0.0, wid, hgt, 0);
+        doc->displayPage(textOut, page, resolution, resolution, 0, !useCropBox, useCropBox, false);
+        const std::vector<TextStreamItem> items = textOut->makeStreamItems();
+        // Numbered as printTSVStream numbers them: a flow ends after a FlowBreak, a line after a
+        // LineBreak or a FlowBreak.
+        int flowNum = 0, lineNum = 0;
+        for (const TextStreamItem &item : items) {
+            double a, b, c, d;
+            item.word->getBBox(&a, &b, &c, &d);
+            int after = 0;
+            switch (item.after) {
+            case TextStreamItem::After::Nothing:
+                after = 0;
+                break;
+            case TextStreamItem::After::Space:
+                after = 1;
+                break;
+            case TextStreamItem::After::LineBreak:
+                after = item.dropHyphen ? 0 : 2;
+                break;
+            case TextStreamItem::After::FlowBreak:
+                after = item.dropHyphen ? 2 : 3;
+                break;
+            }
+            if (item.dropHyphen) {
+                after += 4;
+            }
+            row.clear();
+            GooString::appendf(row, "{0:d}\t{1:d}\t{2:d}\t{3:d}\t{4:.2f}\t{5:.2f}\t{6:.2f}\t{7:.2f}\t{8:d}\t{9:s}\n", 5, page, flowNum, lineNum, a, b, c - a, d - b, after, item.word->getText()->c_str());
+            fputs(row.c_str(), f);
+            if (item.after == TextStreamItem::After::FlowBreak) {
+                ++flowNum;
+                lineNum = 0;
+            } else if (item.after == TextStreamItem::After::LineBreak) {
+                ++lineNum;
+            }
         }
     }
 }

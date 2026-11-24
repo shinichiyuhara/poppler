@@ -3,6 +3,30 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
+## [poppler-26.11.0-sy.6] - 2026-11-24
+
+### Added
+
+- `pdftotext -streamtsv`: the words of `-streamorder -tsv` with what the `-streamorder` text writes
+  after each, in one pass. Columns `level page_num flow line left top width height after text`; only
+  page (level 1) and word (level 5) rows. `after` is 0 nothing, 1 a space, 2 a line break, 3 a blank
+  line, plus 4 when the word's last character is an end-of-line hyphen the text leaves out (the
+  digit is what the text writes, so a removed hyphen at a line end goes with 0, at a flow end with
+  2). The word's text keeps the hyphen, so that its box and its text agree. Boxes are written as
+  `-tsv` writes them (`%.2f`; the page's size `%f`). Implies `-streamorder` and `-tsv`; refused with
+  `-htmlmeta`, `-bbox`, `-layout` and `-raw`.
+  Why: PDFViewer ran both `-streamorder -tsv` and `-streamorder` over every page and lined the
+  two up word by word. That lining-up guessed wrong where a word is only an end-of-line hyphen
+  (table dashes) or ends in a soft hyphen; the fork knows the answer.
+
+### Checked
+
+- On 60 PDFs from the library (first 200 pages each), the output of `-streamorder`,
+  `-streamorder -tsv`, the default mode and `-layout` is the same as `-sy.5` (240 of 240).
+- On the same 60, PDFViewer's words from one `-streamtsv` run equal those from the two runs lined
+  up on 48; the 12 others differ only around end-of-line hyphens, where `-streamtsv` agrees with
+  the text output and the lining-up did not.
+
 ## [poppler-26.11.0-sy.5] - 2026-11-23
 
 ### Fixed

@@ -28,6 +28,11 @@ overlapping text comes out twice.
   line: running heads with wide tracking, a bracket in another font, a subscript.
 - With `-tsv` and `-bbox`, words come in the same order, and `-tsv` lines and blocks are the lines and
   blank-line-separated blocks of the text output. `-bbox-layout` is not changed.
+- `-streamtsv` (sy.6) writes, in one pass, what `-streamorder -tsv` and the `-streamorder` text give in
+  two: a row per word with its box, its flow and line, and what the text writes after it (`after`: 0
+  nothing, 1 a space, 2 a line break, 3 a blank line, plus 4 when its last character is an
+  end-of-line hyphen the text leaves out). Only page and word rows; the columns are
+  `level page_num flow line left top width height after text`.
 
 Without `-streamorder`, the output is meant to be the same as upstream's.
 
