@@ -3,6 +3,30 @@
 Changes to this fork only; upstream's are in `NEWS`. Format follows
 [Keep a Changelog](https://keepachangelog.com/). Tags are `<upstream tag>-sy.<n>`.
 
+## [poppler-26.11.0-sy.7] - 2026-11-25
+
+### Security
+
+Four fixes taken from upstream `master` ahead of its next release (`git cherry-pick -x`, so each commit
+names its upstream original).
+
+- `PSStack::index`: the index is computed in 64 bits, so `sp + i + 1` no longer overflows a signed int
+  (undefined behaviour) before the range check. pdftotext runs this: it evaluates a PostScript (Type 4)
+  function to work out the colour of text in a Separation or DeviceN colour space. Upstream 5f17b5861,
+  adapted to this version's `unlikely()` form.
+- `Splash::fillImageMask`, `Splash::drawImage` and `Splash::arbitraryTransformMask`: the scaled size of an
+  image is computed with overflow checks and a size out of range is refused. pdftotext does not draw
+  with Splash, but the code is built into the library. Upstream 231cc1369 (adapted: this version declares
+  the sizes at the top of the function), b3ab615b5, dd6277e47.
+
+### Checked
+
+- On 30 PDFs, the output of `-streamorder`, `-streamorder -tsv`, the default mode and `-layout` is
+  the same as `-sy.6`.
+- A generated PDF whose text colour comes from a Type 4 function running `2147483647 index`: `-sy.6`
+  crashes (SIGSEGV, a read before the stack); `-sy.7` reports "Stack underflow in PostScript function"
+  and prints the text.
+
 ## [poppler-26.11.0-sy.6] - 2026-11-24
 
 ### Added
